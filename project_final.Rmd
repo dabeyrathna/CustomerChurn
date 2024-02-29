@@ -1,0 +1,1728 @@
+---
+title: "Customer Churn"
+author: "Dilanga Anoop Ash"
+date: "12/4/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# set your working directory to the current file directory 
+tryCatch({
+  setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+  }, error=function(cond){message(paste("cannot change working directory"))
+})
+
+library(ISLR)
+library(GGally)
+library(Hmisc)
+library(e1071)
+library(pROC)
+library(skimr)
+library(tidymodels)
+
+library(dplyr)
+library(tidyverse)
+library(caret)
+library(ISLR)
+library(dlookr)
+library(mice)
+library(VIM)
+library(naniar)
+library(DataExplorer)
+
+```
+
+
+## Read Data
+
+```{r LogReg}
+
+train_original = read.csv("modeldata_aug2020.csv")
+firmo_original = read.csv("Firmographic Data_Aug2020.csv")
+test_original = read.csv("testdata_aug2020.csv")
+
+
+# Left join
+train_data = merge(x = train_original,y = firmo_original,by = "Company_Number", all.x = TRUE)  #left join
+test_data = merge(x = test_original,y = firmo_original,by = "Company_Number", all.x = TRUE)  #left join
+
+plot_intro(train_data)
+plot_intro(test_data)
+
+
+# names(train_data)
+# dim(train_data)
+# # let's get an overview of the data first
+# glimpse(train_data)
+# # nicer:
+# skim(train_data)
+# sapply(train_data, class)
+# View(train_data)
+
+```
+
+
+## Transformations
+
+```{r LogReg}
+
+
+###Split Date column
+
+#date <- as.Date(substr(train_data$Company_Creation_Date, 1, 9))
+# train_data$Company_Creation_Day <- substr(train_data$Company_Creation_Date, 1, 2)
+# train_data$Company_Creation_Month <- substr(train_data$Company_Creation_Date, 3, 5)
+train_data$Company_Creation_Year <- substr(train_data$Company_Creation_Date, 6, 9)
+
+
+#date <- as.Date(substr(test_data$Company_Creation_Date, 1, 9))
+# test_data$Company_Creation_Day <- substr(test_data$Company_Creation_Date, 1, 2)
+# test_data$Company_Creation_Month <- substr(test_data$Company_Creation_Date, 3, 5)
+test_data$Company_Creation_Year <- substr(test_data$Company_Creation_Date, 6, 9)
+
+# How long has it been a company
+train_data$age_of_company <- 2020 - as.integer(train_data$Company_Creation_Year)
+test_data$age_of_company <- 2020 - as.integer(test_data$Company_Creation_Year)
+
+
+# Final feature sekection set
+train_data <- subset(train_data, select=-c(Company_Creation_Date,Company_Number,churn_date,STATE,CITY,ZIP,COUNTRY,
+                                           Small_Business_Indicator,Minority_Owned_Indicator,
+                                           Chief_Executive_Officer_Gender_C,Currency_Code,Chief_Executive_Officer_Title,
+                                           First_Executive_Title,Second_Executive_Title,Third_Executive_Title,Company_Creation_Year,
+                                           total_usage,total_revenue,NAICS2,NAICS3,Hierarchy_Code,Domestic_Ultimate_Revenue,HQ_Employee_Count,US_1987_SIC_2,
+                                           Line_of_Business,Related_Industries,HQ_Country))
+  
+                                           
+test_data <- subset(test_data, select=-c(Company_Creation_Date,Company_Number,STATE,CITY,ZIP,COUNTRY,
+                                           Small_Business_Indicator,Minority_Owned_Indicator,
+                                           Chief_Executive_Officer_Gender_C,Currency_Code,Chief_Executive_Officer_Title,
+                                           First_Executive_Title,Second_Executive_Title,Third_Executive_Title,Company_Creation_Year,
+                                           total_usage,total_revenue,NAICS2,NAICS3,Hierarchy_Code,Domestic_Ultimate_Revenue,HQ_Employee_Count,US_1987_SIC_2,
+                                           Line_of_Business,Related_Industries,HQ_Country))
+
+```
+
+
+
+## remove emplty columns by replacing NA
+
+```{r LogReg}
+
+
+train_data$Location_Type <- as.character(train_data$Location_Type)
+train_data$Location_Type[which(train_data$Location_Type == "")] = NA
+
+
+
+
+train_data$BEMFAB__Marketability_ <- as.character(train_data$BEMFAB__Marketability_)
+train_data$BEMFAB__Marketability_[which(train_data$BEMFAB__Marketability_ == "")] = NA
+
+train_data$Import_Export_Agent_Code <- as.character(train_data$Import_Export_Agent_Code)
+train_data$Import_Export_Agent_Code[which(train_data$Import_Export_Agent_Code == "")] = NA
+
+train_data$Global_Ultimate_Indicator <- as.character(train_data$Global_Ultimate_Indicator)
+train_data$Global_Ultimate_Indicator[which(train_data$Global_Ultimate_Indicator == "")] = NA
+
+train_data$Major_Industry_Category_Name <- as.character(train_data$Major_Industry_Category_Name)
+train_data$Major_Industry_Category_Name[which(train_data$Major_Industry_Category_Name == "")] = NA
+
+train_data$Site_Status <- as.character(train_data$Site_Status)
+train_data$Site_Status[which(train_data$Site_Status == "")] = NA
+
+train_data$Revenue_Range <- as.character(train_data$Revenue_Range)
+train_data$Revenue_Range[which(train_data$Revenue_Range == "")] = NA
+
+
+######################
+#Test
+
+
+test_data$Location_Type <- as.character(test_data$Location_Type)
+test_data$Location_Type[which(test_data$Location_Type == "")] = NA
+
+test_data$BEMFAB__Marketability_ <- as.character(test_data$BEMFAB__Marketability_)
+test_data$BEMFAB__Marketability_[which(test_data$BEMFAB__Marketability_ == "")] = NA
+
+test_data$Public_Private_Indicator <- as.character(test_data$Public_Private_Indicator)
+test_data$Public_Private_Indicator[which(test_data$Public_Private_Indicator == "")] = NA
+
+test_data$Import_Export_Agent_Code <- as.character(test_data$Import_Export_Agent_Code)
+test_data$Import_Export_Agent_Code[which(test_data$Import_Export_Agent_Code == "")] = NA
+
+test_data$Global_Ultimate_Indicator <- as.character(test_data$Global_Ultimate_Indicator)
+test_data$Global_Ultimate_Indicator[which(test_data$Global_Ultimate_Indicator == "")] = NA
+
+test_data$Major_Industry_Category_Name <- as.character(test_data$Major_Industry_Category_Name)
+test_data$Major_Industry_Category_Name[which(test_data$Major_Industry_Category_Name == "")] = NA
+
+test_data$Site_Status <- as.character(test_data$Site_Status)
+test_data$Site_Status[which(test_data$Site_Status == "")] = NA
+
+test_data$Revenue_Range <- as.character(test_data$Revenue_Range)
+test_data$Revenue_Range[which(test_data$Revenue_Range == "")] = NA
+
+
+```
+
+
+## Factorize the categorical variables
+
+```{r LogReg}
+
+
+train_data$churned <- as.character(train_data$churned)
+train_data$churned[which(train_data$churned == "0")] = "NO"
+train_data$churned[which(train_data$churned == "1")] = "YES"
+
+train_data$churned <- as.factor(train_data$churned)
+train_data$Global_Ultimate_Indicator <- as.factor(train_data$Global_Ultimate_Indicator )
+train_data$Business_Code <- as.factor(train_data$Business_Code)
+train_data$Location_Type <- as.factor(train_data$Location_Type )
+train_data$BEMFAB__Marketability_ <- as.factor(train_data$BEMFAB__Marketability_ )
+train_data$Public_Private_Indicator <- as.factor(train_data$Public_Private_Indicator )
+train_data$Owns_Rents_Code <- as.factor(train_data$Owns_Rents_Code )
+train_data$Status_Code <- as.factor(train_data$Status_Code )
+train_data$Revenue_Range <- as.factor(train_data$Revenue_Range)
+train_data$Global_Ultimate_Indicator <- as.factor(train_data$Global_Ultimate_Indicator)
+train_data$Major_Industry_Category_Name <- as.factor(train_data$Major_Industry_Category_Name)
+train_data$Subsidiary_Indicator <- as.factor(train_data$Subsidiary_Indicator)
+train_data$Manufacturing_Indicator <- as.factor(train_data$Manufacturing_Indicator)
+train_data$Legal_Status_Code <- as.factor(train_data$Legal_Status_Code)
+train_data$Population_Code <- as.factor(train_data$Population_Code)
+
+##########################
+#Test
+
+test_data$Global_Ultimate_Indicator <- as.factor(test_data$Global_Ultimate_Indicator )
+test_data$Business_Code <- as.factor(test_data$Business_Code)
+test_data$Location_Type <- as.factor(test_data$Location_Type )
+test_data$BEMFAB__Marketability_ <- as.factor(test_data$BEMFAB__Marketability_ )
+test_data$Public_Private_Indicator <- as.factor(test_data$Public_Private_Indicator )
+test_data$Owns_Rents_Code <- as.factor(test_data$Owns_Rents_Code )
+test_data$Status_Code <- as.factor(test_data$Status_Code )
+test_data$Revenue_Range <- as.factor(test_data$Revenue_Range)
+test_data$Global_Ultimate_Indicator <- as.factor(test_data$Global_Ultimate_Indicator)
+test_data$Major_Industry_Category_Name <- as.factor(test_data$Major_Industry_Category_Name)
+test_data$Subsidiary_Indicator <- as.factor(test_data$Subsidiary_Indicator)
+test_data$Manufacturing_Indicator <- as.factor(test_data$Manufacturing_Indicator)
+test_data$Legal_Status_Code <- as.factor(test_data$Legal_Status_Code)
+test_data$Population_Code <- as.factor(test_data$Population_Code)
+
+
+# ## Levels of factors
+# levels(train_data$churned) #Levels of the Class
+# str(train_data)
+
+```
+
+
+## Imputation
+# Train data imputation
+```{r LogReg}
+# Plot missing values in train_data before imputation
+
+plot_missing(train_data)
+gg_miss_var(train_data)
+res<-summary(aggr(train_data, sortVar=TRUE))$combinations
+```
+
+
+#BAG IMPUTATION
+```{r LogReg}
+train_data$churned = addNA(train_data$churned, ifany = TRUE)
+train_data$Global_Ultimate_Indicator = addNA(train_data$Global_Ultimate_Indicator, ifany = TRUE)
+train_data$Business_Code = addNA(train_data$Business_Code, ifany = TRUE)
+train_data$Location_Type = addNA(train_data$Location_Type, ifany = TRUE)
+train_data$BEMFAB__Marketability_ = addNA(train_data$BEMFAB__Marketability_, ifany = TRUE)
+train_data$Public_Private_Indicator = addNA(train_data$Public_Private_Indicator, ifany = TRUE)
+train_data$Owns_Rents_Code = addNA(train_data$Owns_Rents_Code, ifany = TRUE)
+train_data$Status_Code = addNA(train_data$Status_Code, ifany = TRUE)
+train_data$Revenue_Range = addNA(train_data$Revenue_Range, ifany = TRUE)
+train_data$Global_Ultimate_Indicator = addNA(train_data$Global_Ultimate_Indicator, ifany = TRUE)
+train_data$Major_Industry_Category_Name = addNA(train_data$Major_Industry_Category_Name, ifany = TRUE)
+train_data$Subsidiary_Indicator = addNA(train_data$Subsidiary_Indicator, ifany = TRUE)
+train_data$Manufacturing_Indicator = addNA(train_data$Manufacturing_Indicator, ifany = TRUE)
+train_data$Legal_Status_Code = addNA(train_data$Legal_Status_Code, ifany = TRUE)
+train_data$Population_Code = addNA(train_data$Population_Code, ifany = TRUE)
+train_data$Site_Status = addNA(train_data$Site_Status, ifany = TRUE)
+train_data$Import_Export_Agent_Code = addNA(train_data$Import_Export_Agent_Code, ifany = TRUE)
+
+train_data_numeric <- train_data %>% select_if(is.numeric)
+train_data_categorial <- train_data %>% select_if(~!is.numeric(.x))
+
+# Performing imputation only on numeric variables
+pre_processed_impute_train_data_num <- preProcess(train_data_numeric, method="bagImpute")
+bagimputed_train_data_numeric <- predict(pre_processed_impute_train_data_num, train_data_numeric)
+summary(bagimputed_train_data_numeric)
+plot_missing(impute_data_bag_numeric)
+
+# column bind to add categorial variables back to the dataset
+bagimputed_train_data <- cbind(train_data_categorial, bagimputed_train_data_numeric)
+summary(bagimputed_train_data)
+```
+# Bag Imputed train dataset is available in the variable 'bagimputed_train_data'
+
+```{r LogReg}
+# Plot missing values in after imputation in bagimpute_train_data
+plot_missing(bagimputed_train_data)
+gg_miss_var(bagimputed_train_data)
+res<-summary(aggr(bagimputed_train_data, sortVar=TRUE))$combinations
+na_count <-sapply(bagimputed_train_data, function(y) sum(length(which(is.na(y)))))
+na_count <- data.frame(na_count)
+na_count
+```
+
+# Test data imputation
+```{r LogReg}
+# Plot missing values in train_data before imputation
+plot_missing(test_data)
+gg_miss_var(test_data)
+res<-summary(aggr(test_data, sortVar=TRUE))$combinations
+```
+
+
+#BAG IMPUTATION TEST
+```{r LogReg}
+test_data$Global_Ultimate_Indicator = addNA(test_data$Global_Ultimate_Indicator, ifany = TRUE)
+test_data$Business_Code = addNA(test_data$Business_Code, ifany = TRUE)
+test_data$Location_Type = addNA(test_data$Location_Type, ifany = TRUE)
+test_data$BEMFAB__Marketability_ = addNA(test_data$BEMFAB__Marketability_, ifany = TRUE)
+test_data$Public_Private_Indicator = addNA(test_data$Public_Private_Indicator, ifany = TRUE)
+test_data$Owns_Rents_Code = addNA(test_data$Owns_Rents_Code, ifany = TRUE)
+test_data$Status_Code = addNA(test_data$Status_Code, ifany = TRUE)
+test_data$Revenue_Range = addNA(test_data$Revenue_Range, ifany = TRUE)
+test_data$Global_Ultimate_Indicator = addNA(test_data$Global_Ultimate_Indicator, ifany = TRUE)
+test_data$Major_Industry_Category_Name = addNA(test_data$Major_Industry_Category_Name, ifany = TRUE)
+test_data$Subsidiary_Indicator = addNA(test_data$Subsidiary_Indicator, ifany = TRUE)
+test_data$Manufacturing_Indicator = addNA(test_data$Manufacturing_Indicator, ifany = TRUE)
+test_data$Legal_Status_Code = addNA(test_data$Legal_Status_Code, ifany = TRUE)
+test_data$Population_Code = addNA(test_data$Population_Code, ifany = TRUE)
+test_data$Site_Status = addNA(test_data$Site_Status, ifany = TRUE)
+test_data$Import_Export_Agent_Code = addNA(test_data$Import_Export_Agent_Code, ifany = TRUE)
+
+# Numerical - bagImpute imputation method
+test_data_numeric <- test_data %>% select_if(is.numeric)
+test_data_categorial <- test_data %>% select_if(~!is.numeric(.x))
+
+# Performing imputation only on numeric variables
+pre_processed_impute_test_data_num <- preProcess(test_data_numeric, method="bagImpute")
+bagimputed_test_data_numeric <- predict(pre_processed_impute_test_data_num, test_data_numeric)
+summary(bagimputed_test_data_numeric)
+
+# column bind to add categorial variables back to the dataset
+bagimputed_test_data <- cbind(test_data_categorial, bagimputed_test_data_numeric)
+summary(bagimputed_test_data)
+```
+# Bag Imputed test dataset is available in the variable 'bagimputed_test_data'
+
+```{r LogReg}
+# Plot missing values in after imputation in bagimpute_train_data
+plot_missing(bagimputed_test_data)
+gg_miss_var(bagimputed_test_data)
+res<-summary(aggr(bagimputed_test_data, sortVar=TRUE))$combinations
+na_count <-sapply(bagimputed_test_data, function(y) sum(length(which(is.na(y)))))
+na_count <- data.frame(na_count)
+na_count
+
+```
+
+
+## Replace imputed with original datasets
+
+```{r LogReg}
+
+train_data <- bagimputed_train_data
+test_data <- bagimputed_test_data
+
+```
+
+
+
+## Imputation
+
+```{r LogReg}
+
+library(doParallel)
+num_cores <- detectCores() #note: you can specify a smaller number if you want
+cl <- makePSOCKcluster(num_cores)
+registerDoParallel(cl)
+
+
+# pdf('rplot1.pdf')
+# for (i in 1:ncol(train_data)){
+# 
+#   pbox(train_data, pos = i)
+# }
+# dev.off()
+
+
+train_data$Business_Code <- as.character(train_data$Business_Code)
+train_data$Business_Code[is.na(train_data$Business_Code)] <- "Other"
+
+train_data$Location_Type <- as.character(train_data$Location_Type)
+train_data$Location_Type[is.na(train_data$Location_Type)] <- ""
+train_data$Location_Type[which(train_data$Location_Type == "")] = "unknown8"
+
+train_data$BEMFAB__Marketability_ <- as.character(train_data$BEMFAB__Marketability_)
+train_data$BEMFAB__Marketability_[is.na(train_data$BEMFAB__Marketability_)] <- ""
+train_data$BEMFAB__Marketability_[which(train_data$BEMFAB__Marketability_ == "")] = "unknown9"
+
+train_data$Public_Private_Indicator <- as.character(train_data$Public_Private_Indicator)
+train_data$Public_Private_Indicator[is.na(train_data$Public_Private_Indicator)] <- ""
+train_data$Public_Private_Indicator[which(train_data$Public_Private_Indicator == "")] = "unknown10"
+
+train_data$Import_Export_Agent_Code <- as.character(train_data$Import_Export_Agent_Code)
+train_data$Import_Export_Agent_Code[is.na(train_data$Import_Export_Agent_Code)] <- ""
+train_data$Import_Export_Agent_Code[which(train_data$Import_Export_Agent_Code == "")] = "unknown13"
+
+train_data$Global_Ultimate_Indicator <- as.character(train_data$Global_Ultimate_Indicator)
+train_data$Global_Ultimate_Indicator[is.na(train_data$Global_Ultimate_Indicator)] <- ""
+train_data$Global_Ultimate_Indicator[which(train_data$Global_Ultimate_Indicator == "")] = "unknown16"
+
+train_data$Major_Industry_Category_Name <- as.character(train_data$Major_Industry_Category_Name)
+train_data$Major_Industry_Category_Name[is.na(train_data$Major_Industry_Category_Name)] <- ""
+train_data$Major_Industry_Category_Name[which(train_data$Major_Industry_Category_Name == "")] = "unknown17"
+
+train_data$Site_Status <- as.character(train_data$Site_Status)
+train_data$Site_Status[is.na(train_data$Site_Status)] <- ""
+train_data$Site_Status[which(train_data$Site_Status == "")] = "unknown18"
+
+train_data$Revenue_Range <- as.character(train_data$Revenue_Range)
+train_data$Revenue_Range[is.na(train_data$Revenue_Range)] <- ""
+train_data$Revenue_Range[which(train_data$Revenue_Range == "")] = "unknown19"
+
+train_data$Subsidiary_Indicator <- as.character(train_data$Subsidiary_Indicator)
+train_data$Subsidiary_Indicator[is.na(train_data$Subsidiary_Indicator)] <- ""
+train_data$Subsidiary_Indicator[which(train_data$Subsidiary_Indicator == "")] = "2"
+
+train_data$Manufacturing_Indicator <- as.character(train_data$Manufacturing_Indicator)
+train_data$Manufacturing_Indicator[is.na(train_data$Manufacturing_Indicator)] <- ""
+train_data$Manufacturing_Indicator[which(train_data$Manufacturing_Indicator == "")] = "2"
+
+train_data$Legal_Status_Code <- as.character(train_data$Legal_Status_Code)
+train_data$Legal_Status_Code[is.na(train_data$Legal_Status_Code)] <- ""
+train_data$Legal_Status_Code[which(train_data$Legal_Status_Code == "")] = "200"
+
+train_data$Status_Code <- as.character(train_data$Status_Code)
+train_data$Status_Code[is.na(train_data$Status_Code)] <- ""
+train_data$Status_Code[which(train_data$Status_Code == "")] = "3"
+
+train_data$Population_Code <- as.character(train_data$Population_Code)
+train_data$Population_Code[is.na(train_data$Population_Code)] <- ""
+train_data$Population_Code[which(train_data$Population_Code == "")] = "10"
+
+train_data$Owns_Rents_Code <- as.character(train_data$Owns_Rents_Code)
+train_data$Owns_Rents_Code[is.na(train_data$Owns_Rents_Code)] <- ""
+train_data$Owns_Rents_Code[which(train_data$Owns_Rents_Code == "")] = "ownsrentmiss"
+
+#######################
+#Test
+
+
+test_data$Business_Code <- as.character(test_data$Business_Code)
+test_data$Business_Code[is.na(test_data$Business_Code)] <- "Other"
+
+test_data$Location_Type <- as.character(test_data$Location_Type)
+test_data$Location_Type[is.na(test_data$Location_Type)] <- ""
+test_data$Location_Type[which(test_data$Location_Type == "")] = "unknown8"
+
+test_data$BEMFAB__Marketability_ <- as.character(test_data$BEMFAB__Marketability_)
+test_data$BEMFAB__Marketability_[is.na(test_data$BEMFAB__Marketability_)] <- ""
+test_data$BEMFAB__Marketability_[which(test_data$BEMFAB__Marketability_ == "")] = "unknown9"
+
+test_data$Public_Private_Indicator <- as.character(test_data$Public_Private_Indicator)
+test_data$Public_Private_Indicator[is.na(test_data$Public_Private_Indicator)] <- ""
+test_data$Public_Private_Indicator[which(test_data$Public_Private_Indicator == "")] = "unknown10"
+
+test_data$Import_Export_Agent_Code <- as.character(test_data$Import_Export_Agent_Code)
+test_data$Import_Export_Agent_Code[is.na(test_data$Import_Export_Agent_Code)] <- ""
+test_data$Import_Export_Agent_Code[which(test_data$Import_Export_Agent_Code == "")] = "unknown13"
+
+test_data$Global_Ultimate_Indicator <- as.character(test_data$Global_Ultimate_Indicator)
+test_data$Global_Ultimate_Indicator[is.na(test_data$Global_Ultimate_Indicator)] <- ""
+test_data$Global_Ultimate_Indicator[which(test_data$Global_Ultimate_Indicator == "")] = "unknown16"
+
+test_data$Major_Industry_Category_Name <- as.character(test_data$Major_Industry_Category_Name)
+test_data$Major_Industry_Category_Name[is.na(test_data$Major_Industry_Category_Name)] <- ""
+test_data$Major_Industry_Category_Name[which(test_data$Major_Industry_Category_Name == "")] = "unknown17"
+
+test_data$Site_Status <- as.character(test_data$Site_Status)
+test_data$Site_Status[is.na(test_data$Site_Status)] <- ""
+test_data$Site_Status[which(test_data$Site_Status == "")] = "unknown18"
+
+test_data$Revenue_Range <- as.character(test_data$Revenue_Range)
+test_data$Revenue_Range[is.na(test_data$Revenue_Range)] <- ""
+test_data$Revenue_Range[which(test_data$Revenue_Range == "")] = "unknown19"
+
+test_data$Subsidiary_Indicator <- as.character(test_data$Subsidiary_Indicator)
+test_data$Subsidiary_Indicator[is.na(test_data$Subsidiary_Indicator)] <- ""
+test_data$Subsidiary_Indicator[which(test_data$Subsidiary_Indicator == "")] = "2"
+
+test_data$Manufacturing_Indicator <- as.character(test_data$Manufacturing_Indicator)
+test_data$Manufacturing_Indicator[is.na(test_data$Manufacturing_Indicator)] <- ""
+test_data$Manufacturing_Indicator[which(test_data$Manufacturing_Indicator == "")] = "2"
+
+test_data$Legal_Status_Code <- as.character(test_data$Legal_Status_Code)
+test_data$Legal_Status_Code[is.na(test_data$Legal_Status_Code)] <- ""
+test_data$Legal_Status_Code[which(test_data$Legal_Status_Code == "")] = "200"
+
+test_data$Status_Code <- as.character(test_data$Status_Code)
+test_data$Status_Code[is.na(test_data$Status_Code)] <- ""
+test_data$Status_Code[which(test_data$Status_Code == "")] = "3"
+
+test_data$Population_Code <- as.character(test_data$Population_Code)
+test_data$Population_Code[is.na(test_data$Population_Code)] <- ""
+test_data$Population_Code[which(test_data$Population_Code == "")] = "10"
+
+test_data$Owns_Rents_Code <- as.character(test_data$Owns_Rents_Code)
+test_data$Owns_Rents_Code[is.na(test_data$Owns_Rents_Code)] <- ""
+test_data$Owns_Rents_Code[which(test_data$Owns_Rents_Code == "")] = "ownsrentmiss"
+
+```
+
+
+## Factorize the categorical variables
+
+```{r LogReg}
+
+
+train_data$Business_Code <- as.factor(train_data$Business_Code)
+train_data$Location_Type <- as.factor(train_data$Location_Type )
+train_data$BEMFAB__Marketability_ <- as.factor(train_data$BEMFAB__Marketability_ )
+train_data$Public_Private_Indicator <- as.factor(train_data$Public_Private_Indicator )
+train_data$Owns_Rents_Code <- as.factor(train_data$Owns_Rents_Code )
+train_data$Status_Code <- as.factor(train_data$Status_Code )
+train_data$Revenue_Range <- as.factor(train_data$Revenue_Range)
+train_data$Global_Ultimate_Indicator <- as.factor(train_data$Global_Ultimate_Indicator)
+train_data$Major_Industry_Category_Name <- as.factor(train_data$Major_Industry_Category_Name)
+train_data$Subsidiary_Indicator <- as.factor(train_data$Subsidiary_Indicator)
+train_data$Legal_Status_Code <- as.factor(train_data$Legal_Status_Code)
+train_data$Population_Code <- as.factor(train_data$Population_Code)
+train_data$Manufacturing_Indicator <- as.factor(train_data$Manufacturing_Indicator)
+train_data$Import_Export_Agent_Code <- as.factor(train_data$Import_Export_Agent_Code)
+train_data$Site_Status <- as.factor(train_data$Site_Status)
+
+test_data$Business_Code <- as.factor(test_data$Business_Code)
+test_data$Location_Type <- as.factor(test_data$Location_Type )
+test_data$BEMFAB__Marketability_ <- as.factor(test_data$BEMFAB__Marketability_ )
+test_data$Public_Private_Indicator <- as.factor(test_data$Public_Private_Indicator )
+test_data$Owns_Rents_Code <- as.factor(test_data$Owns_Rents_Code )
+test_data$Status_Code <- as.factor(test_data$Status_Code )
+test_data$Revenue_Range <- as.factor(test_data$Revenue_Range)
+test_data$Global_Ultimate_Indicator <- as.factor(test_data$Global_Ultimate_Indicator)
+test_data$Major_Industry_Category_Name <- as.factor(test_data$Major_Industry_Category_Name)
+test_data$Subsidiary_Indicator <- as.factor(test_data$Subsidiary_Indicator)
+test_data$Legal_Status_Code <- as.factor(test_data$Legal_Status_Code)
+test_data$Population_Code <- as.factor(test_data$Population_Code)
+test_data$Manufacturing_Indicator <- as.factor(test_data$Manufacturing_Indicator)
+test_data$Import_Export_Agent_Code <- as.factor(test_data$Import_Export_Agent_Code)
+test_data$Site_Status <- as.factor(test_data$Site_Status)
+# ## Levels of factors
+# levels(train_data$churned) #Levels of the Class
+# str(train_data)
+
+```
+
+
+
+
+## Merge categories
+```{r}
+
+library(forcats)
+
+vari <- train_data$Import_Export_Agent_Code
+
+difference_train <- setdiff(levels(as.factor(train_data$Import_Export_Agent_Code)),c("A","B","C","D","G","H","unknown13"))
+difference_test <- setdiff(levels(as.factor(test_data$Import_Export_Agent_Code)),c("A","B","C","D","G","H","unknown13"))
+
+train_data$Import_Export_Agent_Code <- fct_collapse(train_data$Import_Export_Agent_Code, unknown13 = difference_train)
+test_data$Import_Export_Agent_Code <- fct_collapse(test_data$Import_Export_Agent_Code, unknown13 = difference_test)
+
+```
+
+
+
+## Outlier treatment
+
+```{r LogReg}
+
+#Capping
+
+outlier_norm <- function(x){
+   qntile <- quantile(x, probs=c(.25, .75))
+   caps <- quantile(x, probs=c(.05, .95))
+   H <- 1.5 * IQR(x, na.rm = T)
+   x[x < (qntile[1] - H)] <- caps[1]
+   x[x > (qntile[2] + H)] <- caps[2]
+   return(x)
+}
+
+train_data$total_products=outlier_norm(train_data$total_products)
+train_data$total_transactions=outlier_norm(train_data$total_transactions)
+train_data$total_accounts=outlier_norm(train_data$total_accounts)
+train_data$Square_Footage=outlier_norm(train_data$Square_Footage)
+train_data$Number_of_Family_Members=outlier_norm(train_data$Number_of_Family_Members)
+train_data$Domestic_Ultimate_Employee_Count=outlier_norm(train_data$Domestic_Ultimate_Employee_Count)
+train_data$US_1987_SIC_1=outlier_norm(train_data$US_1987_SIC_1)
+
+
+test_data$total_products=outlier_norm(test_data$total_products)
+test_data$total_transactions=outlier_norm(test_data$total_transactions)
+test_data$total_accounts=outlier_norm(test_data$total_accounts)
+test_data$Square_Footage=outlier_norm(test_data$Square_Footage)
+test_data$Number_of_Family_Members=outlier_norm(test_data$Number_of_Family_Members)
+test_data$Domestic_Ultimate_Employee_Count=outlier_norm(test_data$Domestic_Ultimate_Employee_Count)
+test_data$US_1987_SIC_1=outlier_norm(test_data$US_1987_SIC_1)
+
+# pdf('rplot1.pdf')
+# for (i in 1:ncol(train_data)){
+# 
+#   pbox(train_data, pos = i)
+# }
+# dev.off()
+
+
+
+```
+
+
+## Download datasets
+
+```{r LogReg}
+
+trainIndex <- createDataPartition(train_data[['churned']], p = 0.8, list = FALSE)
+data_train <- train_data %>% dplyr::slice(trainIndex)
+data_val <- train_data %>% dplyr::slice(-trainIndex)
+
+write.csv(data_train,"train_data_final_classification_new.csv")
+write.csv(data_val,"val_data_final_classification_new.csv")
+write.csv(test_data,"test_data_final_classification_new.csv")
+
+
+```
+
+
+## Explore data
+
+
+```{r LogReg}
+skim(train_data)
+summary(train_data)
+
+dds <- train_data %>% ggpairs(aes(color = churned), legend = c(1)) 
+colnames(train_data)
+str(train_data)
+
+corr_plot <- plot_correlation(train_data)
+plot_intro(train_data)
+plot_intro(test_data)
+plot_str(train_data)
+
+prop.table(table(train_data$churned)) 
+
+
+# 
+# d=train_data
+# cor(d[,sapply(d,is.numeric)])
+# 
+# corrplot(cor(d[,sapply(d,is.numeric)]))
+# 
+# chart.Correlation(d[,sapply(d,is.numeric)])
+# boxplot(train_data[-9], col = 'orange', main = 'Features Boxplot')
+
+```
+
+
+## Variable selection
+
+```{r LogReg}
+
+library(glmnet)
+
+target_var <- 'churned'
+model_form <- churned ~ .
+model_type <- 'glmnet'
+
+trControl <- trainControl(method = 'cv', number = 5, savePredictions = TRUE, selectionFunction = 'oneSE')
+#tGrid <- expand.grid(alpha = c(1), lambda = 10^seq(3, -2, length = 100)) # alpha = 1 indicates LASSO
+
+
+# note: as the penalty depends on the absolute size of the beta parameters, we should standardize the data first
+model_recipe <- recipe(model_form, data = train_data) %>% 
+  step_novel(all_predictors(), -all_numeric()) %>%
+  step_unknown(all_predictors(), -all_numeric()) %>%
+  step_dummy(all_nominal(), -all_outcomes()) %>%
+  step_normalize(all_predictors()) %>%
+  step_zv(all_predictors())
+
+
+
+lasso <- train(model_recipe, data = train_data, method = model_type, trControl = trControl)
+
+View(train_data)
+
+lasso
+plot(lasso)
+
+# we can also look at which variables are selected for LASSO
+(lasso_best_coef <- coef(lasso$finalModel, lasso$bestTune$lambda))
+
+# let's predict the performance of the ridge regression on the test data and compare it against standard linear regression
+lm_fit <- train(model_recipe, data = data_train, method = 'lm', trControl = trControl)
+
+lasso_pred <- predict(lasso, newdata = data_test, type = 'raw')
+lm_pred <- predict(lm_fit, newdata = data_test, type = 'raw')
+
+(rmse_lasso <- postResample(pred = lasso_pred, obs= data_test[[target_var]]))
+(rmse_lm <- postResample(pred = lm_pred, obs= data_test[[target_var]]))
+
+
+```
+
+```{r}
+
+###################################################
+
+#Random Forest model
+
+##################################################
+
+
+library(randomForest)
+library(pROC)
+library(caret)
+library(tidyverse)
+library(tidymodels)
+
+
+memory.size() ### Checking your memory size
+memory.limit() ## Checking the set limit
+memory.limit(size=76000)
+
+library(doParallel)
+num_cores <- detectCores() #note: you can specify a smaller number if you want
+cl <- makePSOCKcluster(num_cores)
+registerDoParallel(cl)
+
+set.seed(123)
+
+target_var <- 'churned'
+model_form <- churned ~ .
+model_type <- "rf"
+
+positive_class <- "YES"
+negative_class <- "NO"
+
+model_recipe <- recipe(model_form, data = data_train) %>% 
+  step_novel(all_predictors(), -all_numeric()) %>%
+  step_unknown(all_predictors(), -all_numeric()) %>%
+  step_dummy(all_nominal(), -all_outcomes()) %>% 
+  step_zv(all_predictors())
+
+trControl <- trainControl(method = 'cv',number = 10, savePredictions = TRUE, classProbs = TRUE, summaryFunction = twoClassSummary)
+
+rf_chorn <- train(model_recipe, data = data_train , method = model_type, trControl = trControl, metric = 'ROC')
+rf_chorn
+
+# for variable importance, we can look into following functions
+importance(rf_chorn$finalModel)
+varImpPlot(rf_chorn$finalModel)
+
+rf_pred <- rf_chorn %>% predict(newdata = data_val, type = 'raw')
+rf_prob <- rf_chorn %>% predict(newdata = data_val, type = 'prob')
+
+# Confusion matrix
+confusionMatrix(rf_pred, data_val[[target_var]], positive = positive_class)
+roc(data_val[[target_var]], rf_prob[[positive_class]], plot = TRUE, print.auc = TRUE, legacy.axes = TRUE)
+
+rf_pred_test <- rf_chorn %>% predict(newdata = test_data, type = 'raw')
+rf_prob_test <- rf_chorn %>% predict(newdata = test_data, type = 'prob')
+
+testPredict <- rf_chorn %>% predict(newdata = test_data)
+
+write.csv(testPredict, 'test_predict_rf_train_acc_89_1.csv')
+
+stopImplicitCluster()
+
+
+########################################################
+
+##XGB
+
+########################################################
+
+library(doParallel)
+library(xgboost)
+num_cores <- detectCores() #note: you can specify a smaller number if you want
+cl <- makePSOCKcluster(num_cores)
+registerDoParallel(cl)
+
+set.seed(123)
+
+
+target_var <- 'churned'
+model_form <- churned ~ .
+model_type <- "xgbTree"
+
+positive_class <- "YES"
+negative_class <- "NO"
+
+trControl <- trainControl(method = 'cv', number = 10, savePredictions = TRUE, classProbs = TRUE, summaryFunction = twoClassSummary)
+
+model_recipe <- recipe(model_form, data = data_train) %>%
+  step_novel(all_predictors(), -all_numeric()) %>%
+  step_unknown(all_predictors(), -all_numeric()) %>%
+  step_dummy(all_nominal(), -all_outcomes()) %>%
+  step_zv(all_predictors())
+
+
+xgb_model <- train(model_recipe, data = data_train, method = model_type, trControl = trControl, metric = 'ROC')
+xgb_model
+
+xgb_pred <- xgb_model %>% predict(newdata = data_val, type = 'raw')
+xgb_prob <- xgb_model %>% predict(newdata = data_val, type = 'prob')
+
+# Confusion matrix
+confusionMatrix(xgb_pred, data_val[[target_var]], positive = positive_class)
+
+roc(data_val[[target_var]], xgb_prob[[positive_class]], plot = TRUE, print.auc = TRUE, legacy.axes = TRUE)
+
+xgb_pred <- xgb_model %>% predict(newdata = test_data, type = 'raw')
+xgb_prob <- xgb_model %>% predict(newdata = test_data, type = 'prob')
+
+stopImplicitCluster()
+
+########################################################
+
+##SVM
+
+########################################################
+
+library(doParallel)
+library(xgboost)
+num_cores <- detectCores() #note: you can specify a smaller number if you want
+cl <- makePSOCKcluster(num_cores)
+registerDoParallel(cl)
+
+set.seed(123)
+
+
+target_var <- 'churned'
+model_form <- churned ~ .
+model_type <- "svmRadial"
+
+positive_class <- "NO"
+negative_class <- "YES"
+
+trControl <- trainControl(method = 'cv', number = 10, savePredictions = TRUE, classProbs = TRUE, summaryFunction = twoClassSummary)
+
+model_recipe <- recipe(model_form, data = data_train) %>%
+  step_novel(all_predictors(), -all_numeric()) %>%
+  step_unknown(all_predictors(), -all_numeric()) %>%
+  step_dummy(all_nominal(), -all_outcomes()) %>%
+  step_zv(all_predictors())
+
+
+svm_model <- train(model_recipe, data = data_train, method = model_type, trControl = trControl, metric = 'ROC')
+svm_model
+
+svm_pred <- svm_model %>% predict(newdata = data_val, type = 'raw')
+svm_prob <- svm_model %>% predict(newdata = data_val, type = 'prob')
+
+# Confusion matrix
+confusionMatrix(svm_pred, data_val[[target_var]], positive = positive_class)
+
+roc(data_val[[target_var]], svm_prob[[positive_class]], plot = TRUE, print.auc = TRUE, legacy.axes = TRUE)
+
+svm_pred <- svm_model %>% predict(newdata = test_data, type = 'raw')
+svm_prob <- svm_model %>% predict(newdata = test_data, type = 'prob')
+
+stopImplicitCluster()
+
+```
+
+
+## Classify ensemble model
+
+```{r LogReg}
+
+library(caretEnsemble)
+library(randomForest)
+library(pROC)
+library(caret)
+library(tidyverse)
+library(tidymodels)
+library(dplyr)
+library(ggplot2)
+library(PerformanceAnalytics)
+library(ggthemes)
+library(corrplot)
+library(car)
+library(psych)
+library(caret)
+library(caretEnsemble)
+library(doParallel)
+library(xgboost)
+
+
+num_cores <- detectCores() #note: you can specify a smaller number if you want
+cl <- makePSOCKcluster(num_cores)
+registerDoParallel(cl)
+
+set.seed(123)
+
+methods = c('svmRadial','rf','xgbTree')
+
+tc = trainControl(method = "repeatedcv", number = 10,repeats = 3, classProbs = TRUE)
+
+
+
+models = caretList(churned~., data = data_train, 
+                   trControl = tc, methodList = methods)
+
+output = resamples(models)
+summary(output)
+
+dotplot(output)
+
+stack = caretStack(models, method="glm", trControl = tc)
+
+summary(stack)
+
+pred = predict(stack, data_val[,-1]) # validation
+cm = confusionMatrix(test$churned, pred, positive = 'NO')
+print(cm)
+
+# final predictions
+pred = predict(stack, test_data)
+
+write.csv(pre, 'test_data_ensemble_predict_rf_xgb_svm_final.csv')
+
+stopImplicitCluster()
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Regression for churn year
+
+
+
+## Read Data
+
+```{r LogReg}
+
+train_original = read.csv("modeldata_aug2020.csv")
+firmo_original = read.csv("Firmographic Data_Aug2020.csv")
+test_original = read.csv("testdata_aug2020.csv")
+
+train_original$churn_date <- as.Date(train_original$churn_date, format="%m/%d/%Y")
+
+train_original <- train_original[!is.na(train_original$churn_date),]
+
+
+# Inner join
+train_reg_data = merge(x = train_original,y = firmo_original,by = "Company_Number", all.x = TRUE)  #left join
+test_reg_data = merge(x = test_original,y = firmo_original,by = "Company_Number", all.x = TRUE)  #left join
+
+
+names(train_reg_data)
+dim(train_reg_data)
+# let's get an overview of the data first
+glimpse(train_reg_data)
+# nicer:
+skim(train_reg_data)
+sapply(train_reg_data, class)
+
+
+#View(train_reg_data)
+
+```
+
+
+
+## Transformations
+
+```{r LogReg}
+
+
+###Split Date column
+
+#date <- as.Date(substr(train_reg_data$Company_Creation_Date, 1, 9))
+# train_reg_data$Company_Creation_Day <- substr(train_reg_data$Company_Creation_Date, 1, 2)
+# train_reg_data$Company_Creation_Month <- substr(train_reg_data$Company_Creation_Date, 3, 5)
+train_reg_data$Company_Creation_Year <- substr(train_reg_data$Company_Creation_Date, 6, 9)
+
+
+#date <- as.Date(substr(test_reg_data$Company_Creation_Date, 1, 9))
+# test_reg_data$Company_Creation_Day <- substr(test_reg_data$Company_Creation_Date, 1, 2)
+# test_reg_data$Company_Creation_Month <- substr(test_reg_data$Company_Creation_Date, 3, 5)
+test_reg_data$Company_Creation_Year <- substr(test_reg_data$Company_Creation_Date, 6, 9)
+
+
+train_reg_data$age_of_company <- 2020 - as.integer(train_reg_data$Company_Creation_Year)
+test_reg_data$age_of_company <- 2020 - as.integer(test_reg_data$Company_Creation_Year)
+
+
+train_reg_data$churned_year <-  as.numeric(format(train_reg_data$churn_date,'%Y')) - as.integer(train_reg_data$Company_Creation_Year)
+
+
+# train_reg_data <- train_reg_data[!is.na(train_reg_data$churned_year),]
+# 
+
+
+
+train_reg_data <- subset(train_reg_data, select=-c(Company_Creation_Date,Company_Number,churned,churn_date,STATE,CITY,ZIP,COUNTRY,
+                                           Small_Business_Indicator,Minority_Owned_Indicator,
+                                           Chief_Executive_Officer_Gender_C,Currency_Code,Chief_Executive_Officer_Title,
+                                           First_Executive_Title,Second_Executive_Title,Third_Executive_Title,Company_Creation_Year,
+                                           total_usage,total_revenue,NAICS2,NAICS3,Hierarchy_Code,Domestic_Ultimate_Revenue,HQ_Employee_Count,US_1987_SIC_2,
+                                           Line_of_Business,Related_Industries,HQ_Country))
+  
+                                           
+test_reg_data <- subset(test_reg_data, select=-c(Company_Creation_Date,Company_Number,STATE,CITY,ZIP,COUNTRY,
+                                           Small_Business_Indicator,Minority_Owned_Indicator,
+                                           Chief_Executive_Officer_Gender_C,Currency_Code,Chief_Executive_Officer_Title,
+                                           First_Executive_Title,Second_Executive_Title,Third_Executive_Title,Company_Creation_Year,
+                                           total_usage,total_revenue,NAICS2,NAICS3,Hierarchy_Code,Domestic_Ultimate_Revenue,HQ_Employee_Count,US_1987_SIC_2,
+                                            Line_of_Business,Related_Industries,HQ_Country))
+
+
+
+```
+
+
+
+
+
+## remove emplty columns by replacing NA
+
+```{r LogReg}
+
+
+train_reg_data$Location_Type <- as.character(train_reg_data$Location_Type)
+train_reg_data$Location_Type[which(train_reg_data$Location_Type == "")] = NA
+
+train_reg_data$BEMFAB__Marketability_ <- as.character(train_reg_data$BEMFAB__Marketability_)
+train_reg_data$BEMFAB__Marketability_[which(train_reg_data$BEMFAB__Marketability_ == "")] = NA
+
+train_reg_data$Import_Export_Agent_Code <- as.character(train_reg_data$Import_Export_Agent_Code)
+train_reg_data$Import_Export_Agent_Code[which(train_reg_data$Import_Export_Agent_Code == "")] = NA
+
+train_reg_data$Global_Ultimate_Indicator <- as.character(train_reg_data$Global_Ultimate_Indicator)
+train_reg_data$Global_Ultimate_Indicator[which(train_reg_data$Global_Ultimate_Indicator == "")] = NA
+
+train_reg_data$Major_Industry_Category_Name <- as.character(train_reg_data$Major_Industry_Category_Name)
+train_reg_data$Major_Industry_Category_Name[which(train_reg_data$Major_Industry_Category_Name == "")] = NA
+
+train_reg_data$Site_Status <- as.character(train_reg_data$Site_Status)
+train_reg_data$Site_Status[which(train_reg_data$Site_Status == "")] = NA
+
+train_reg_data$Revenue_Range <- as.character(train_reg_data$Revenue_Range)
+train_reg_data$Revenue_Range[which(train_reg_data$Revenue_Range == "")] = NA
+
+
+######################
+#Test
+
+
+test_reg_data$Location_Type <- as.character(test_reg_data$Location_Type)
+test_reg_data$Location_Type[which(test_reg_data$Location_Type == "")] = NA
+
+test_reg_data$BEMFAB__Marketability_ <- as.character(test_reg_data$BEMFAB__Marketability_)
+test_reg_data$BEMFAB__Marketability_[which(test_reg_data$BEMFAB__Marketability_ == "")] = NA
+
+test_reg_data$Public_Private_Indicator <- as.character(test_reg_data$Public_Private_Indicator)
+test_reg_data$Public_Private_Indicator[which(test_reg_data$Public_Private_Indicator == "")] = NA
+
+test_reg_data$Import_Export_Agent_Code <- as.character(test_reg_data$Import_Export_Agent_Code)
+test_reg_data$Import_Export_Agent_Code[which(test_reg_data$Import_Export_Agent_Code == "")] = NA
+
+test_reg_data$Global_Ultimate_Indicator <- as.character(test_reg_data$Global_Ultimate_Indicator)
+test_reg_data$Global_Ultimate_Indicator[which(test_reg_data$Global_Ultimate_Indicator == "")] = NA
+
+test_reg_data$Major_Industry_Category_Name <- as.character(test_reg_data$Major_Industry_Category_Name)
+test_reg_data$Major_Industry_Category_Name[which(test_reg_data$Major_Industry_Category_Name == "")] = NA
+
+test_reg_data$Site_Status <- as.character(test_reg_data$Site_Status)
+test_reg_data$Site_Status[which(test_reg_data$Site_Status == "")] = NA
+
+test_reg_data$Revenue_Range <- as.character(test_reg_data$Revenue_Range)
+test_reg_data$Revenue_Range[which(test_reg_data$Revenue_Range == "")] = NA
+
+
+```
+
+
+## Factorize the categorical variables
+
+```{r LogReg}
+
+train_reg_data$Global_Ultimate_Indicator <- as.factor(train_reg_data$Global_Ultimate_Indicator )
+train_reg_data$Business_Code <- as.factor(train_reg_data$Business_Code)
+train_reg_data$Location_Type <- as.factor(train_reg_data$Location_Type )
+train_reg_data$BEMFAB__Marketability_ <- as.factor(train_reg_data$BEMFAB__Marketability_ )
+train_reg_data$Public_Private_Indicator <- as.factor(train_reg_data$Public_Private_Indicator )
+train_reg_data$Owns_Rents_Code <- as.factor(train_reg_data$Owns_Rents_Code )
+train_reg_data$Status_Code <- as.factor(train_reg_data$Status_Code )
+train_reg_data$Revenue_Range <- as.factor(train_reg_data$Revenue_Range)
+train_reg_data$Global_Ultimate_Indicator <- as.factor(train_reg_data$Global_Ultimate_Indicator)
+train_reg_data$Major_Industry_Category_Name <- as.factor(train_reg_data$Major_Industry_Category_Name)
+train_reg_data$Subsidiary_Indicator <- as.factor(train_reg_data$Subsidiary_Indicator)
+train_reg_data$Manufacturing_Indicator <- as.factor(train_reg_data$Manufacturing_Indicator)
+train_reg_data$Legal_Status_Code <- as.factor(train_reg_data$Legal_Status_Code)
+train_reg_data$Population_Code <- as.factor(train_reg_data$Population_Code)
+
+##########################
+#Test
+
+test_reg_data$Global_Ultimate_Indicator <- as.factor(test_reg_data$Global_Ultimate_Indicator )
+test_reg_data$Business_Code <- as.factor(test_reg_data$Business_Code)
+test_reg_data$Location_Type <- as.factor(test_reg_data$Location_Type )
+test_reg_data$BEMFAB__Marketability_ <- as.factor(test_reg_data$BEMFAB__Marketability_ )
+test_reg_data$Public_Private_Indicator <- as.factor(test_reg_data$Public_Private_Indicator )
+test_reg_data$Owns_Rents_Code <- as.factor(test_reg_data$Owns_Rents_Code )
+test_reg_data$Status_Code <- as.factor(test_reg_data$Status_Code )
+test_reg_data$Revenue_Range <- as.factor(test_reg_data$Revenue_Range)
+test_reg_data$Global_Ultimate_Indicator <- as.factor(test_reg_data$Global_Ultimate_Indicator)
+test_reg_data$Major_Industry_Category_Name <- as.factor(test_reg_data$Major_Industry_Category_Name)
+test_reg_data$Subsidiary_Indicator <- as.factor(test_reg_data$Subsidiary_Indicator)
+test_reg_data$Manufacturing_Indicator <- as.factor(test_reg_data$Manufacturing_Indicator)
+test_reg_data$Legal_Status_Code <- as.factor(test_reg_data$Legal_Status_Code)
+test_reg_data$Population_Code <- as.factor(test_reg_data$Population_Code)
+
+
+# ## Levels of factors
+# levels(train_reg_data$churned) #Levels of the Class
+# str(train_reg_data)
+
+```
+
+
+## Imputation
+# Train data imputation
+```{r LogReg}
+# Plot missing values in train_reg_data before imputation
+
+plot_missing(train_reg_data)
+gg_miss_var(train_reg_data)
+res<-summary(aggr(train_reg_data, sortVar=TRUE))$combinations
+```
+
+
+#BAG IMPUTATION
+```{r LogReg}
+train_reg_data$Global_Ultimate_Indicator = addNA(train_reg_data$Global_Ultimate_Indicator, ifany = TRUE)
+train_reg_data$Business_Code = addNA(train_reg_data$Business_Code, ifany = TRUE)
+train_reg_data$Location_Type = addNA(train_reg_data$Location_Type, ifany = TRUE)
+train_reg_data$BEMFAB__Marketability_ = addNA(train_reg_data$BEMFAB__Marketability_, ifany = TRUE)
+train_reg_data$Public_Private_Indicator = addNA(train_reg_data$Public_Private_Indicator, ifany = TRUE)
+train_reg_data$Owns_Rents_Code = addNA(train_reg_data$Owns_Rents_Code, ifany = TRUE)
+train_reg_data$Status_Code = addNA(train_reg_data$Status_Code, ifany = TRUE)
+train_reg_data$Revenue_Range = addNA(train_reg_data$Revenue_Range, ifany = TRUE)
+train_reg_data$Global_Ultimate_Indicator = addNA(train_reg_data$Global_Ultimate_Indicator, ifany = TRUE)
+train_reg_data$Major_Industry_Category_Name = addNA(train_reg_data$Major_Industry_Category_Name, ifany = TRUE)
+train_reg_data$Subsidiary_Indicator = addNA(train_reg_data$Subsidiary_Indicator, ifany = TRUE)
+train_reg_data$Manufacturing_Indicator = addNA(train_reg_data$Manufacturing_Indicator, ifany = TRUE)
+train_reg_data$Legal_Status_Code = addNA(train_reg_data$Legal_Status_Code, ifany = TRUE)
+train_reg_data$Population_Code = addNA(train_reg_data$Population_Code, ifany = TRUE)
+train_reg_data$Site_Status = addNA(train_reg_data$Site_Status, ifany = TRUE)
+train_reg_data$Import_Export_Agent_Code = addNA(train_reg_data$Import_Export_Agent_Code, ifany = TRUE)
+
+train_reg_data_numeric <- train_reg_data %>% select_if(is.numeric)
+train_reg_data_categorial <- train_reg_data %>% select_if(~!is.numeric(.x))
+
+# Performing imputation only on numeric variables
+pre_processed_impute_train_reg_data_num <- preProcess(train_reg_data_numeric, method="bagImpute")
+bagimputed_train_reg_data_numeric <- predict(pre_processed_impute_train_reg_data_num, train_reg_data_numeric)
+summary(bagimputed_train_reg_data_numeric)
+plot_missing(impute_data_bag_numeric)
+
+# column bind to add categorial variables back to the dataset
+bagimputed_train_reg_data <- cbind(train_reg_data_categorial, bagimputed_train_reg_data_numeric)
+summary(bagimputed_train_reg_data)
+```
+# Bag Imputed train dataset is available in the variable 'bagimputed_train_reg_data'
+
+```{r LogReg}
+# Plot missing values in after imputation in bagimpute_train_reg_data
+plot_missing(bagimputed_train_reg_data)
+gg_miss_var(bagimputed_train_reg_data)
+res<-summary(aggr(bagimputed_train_reg_data, sortVar=TRUE))$combinations
+na_count <-sapply(bagimputed_train_reg_data, function(y) sum(length(which(is.na(y)))))
+na_count <- data.frame(na_count)
+na_count
+```
+
+# Test data imputation
+```{r LogReg}
+# Plot missing values in train_reg_data before imputation
+plot_missing(test_reg_data)
+gg_miss_var(test_reg_data)
+res<-summary(aggr(test_reg_data, sortVar=TRUE))$combinations
+```
+
+
+#BAG IMPUTATION TEST
+```{r LogReg}
+test_reg_data$Global_Ultimate_Indicator = addNA(test_reg_data$Global_Ultimate_Indicator, ifany = TRUE)
+test_reg_data$Business_Code = addNA(test_reg_data$Business_Code, ifany = TRUE)
+test_reg_data$Location_Type = addNA(test_reg_data$Location_Type, ifany = TRUE)
+test_reg_data$BEMFAB__Marketability_ = addNA(test_reg_data$BEMFAB__Marketability_, ifany = TRUE)
+test_reg_data$Public_Private_Indicator = addNA(test_reg_data$Public_Private_Indicator, ifany = TRUE)
+test_reg_data$Owns_Rents_Code = addNA(test_reg_data$Owns_Rents_Code, ifany = TRUE)
+test_reg_data$Status_Code = addNA(test_reg_data$Status_Code, ifany = TRUE)
+test_reg_data$Revenue_Range = addNA(test_reg_data$Revenue_Range, ifany = TRUE)
+test_reg_data$Global_Ultimate_Indicator = addNA(test_reg_data$Global_Ultimate_Indicator, ifany = TRUE)
+test_reg_data$Major_Industry_Category_Name = addNA(test_reg_data$Major_Industry_Category_Name, ifany = TRUE)
+test_reg_data$Subsidiary_Indicator = addNA(test_reg_data$Subsidiary_Indicator, ifany = TRUE)
+test_reg_data$Manufacturing_Indicator = addNA(test_reg_data$Manufacturing_Indicator, ifany = TRUE)
+test_reg_data$Legal_Status_Code = addNA(test_reg_data$Legal_Status_Code, ifany = TRUE)
+test_reg_data$Population_Code = addNA(test_reg_data$Population_Code, ifany = TRUE)
+test_reg_data$Site_Status = addNA(test_reg_data$Site_Status, ifany = TRUE)
+test_reg_data$Import_Export_Agent_Code = addNA(test_reg_data$Import_Export_Agent_Code, ifany = TRUE)
+
+# Numerical - bagImpute imputation method
+test_reg_data_numeric <- test_reg_data %>% select_if(is.numeric)
+test_reg_data_categorial <- test_reg_data %>% select_if(~!is.numeric(.x))
+
+# Performing imputation only on numeric variables
+pre_processed_impute_test_reg_data_num <- preProcess(test_reg_data_numeric, method="bagImpute")
+bagimputed_test_reg_data_numeric <- predict(pre_processed_impute_test_reg_data_num, test_reg_data_numeric)
+summary(bagimputed_test_reg_data_numeric)
+
+# column bind to add categorial variables back to the dataset
+bagimputed_test_reg_data <- cbind(test_reg_data_categorial, bagimputed_test_reg_data_numeric)
+summary(bagimputed_test_reg_data)
+```
+# Bag Imputed test dataset is available in the variable 'bagimputed_test_reg_data'
+
+```{r LogReg}
+# Plot missing values in after imputation in bagimpute_train_reg_data
+plot_missing(bagimputed_test_reg_data)
+gg_miss_var(bagimputed_test_reg_data)
+res<-summary(aggr(bagimputed_test_reg_data, sortVar=TRUE))$combinations
+na_count <-sapply(bagimputed_test_reg_data, function(y) sum(length(which(is.na(y)))))
+na_count <- data.frame(na_count)
+na_count
+
+```
+
+
+## Replace imputed with original datasets
+
+```{r LogReg}
+
+train_reg_data <- bagimputed_train_reg_data
+test_reg_data <- bagimputed_test_reg_data
+
+```
+
+
+
+## Imputation
+
+```{r LogReg}
+
+library(doParallel)
+num_cores <- detectCores() #note: you can specify a smaller number if you want
+cl <- makePSOCKcluster(num_cores)
+registerDoParallel(cl)
+
+
+# pdf('rplot1.pdf')
+# for (i in 1:ncol(train_reg_data)){
+# 
+#   pbox(train_reg_data, pos = i)
+# }
+# dev.off()
+
+
+train_reg_data$Business_Code <- as.character(train_reg_data$Business_Code)
+train_reg_data$Business_Code[is.na(train_reg_data$Business_Code)] <- "Other"
+
+train_reg_data$Location_Type <- as.character(train_reg_data$Location_Type)
+train_reg_data$Location_Type[is.na(train_reg_data$Location_Type)] <- ""
+train_reg_data$Location_Type[which(train_reg_data$Location_Type == "")] = "unknown8"
+
+train_reg_data$BEMFAB__Marketability_ <- as.character(train_reg_data$BEMFAB__Marketability_)
+train_reg_data$BEMFAB__Marketability_[is.na(train_reg_data$BEMFAB__Marketability_)] <- ""
+train_reg_data$BEMFAB__Marketability_[which(train_reg_data$BEMFAB__Marketability_ == "")] = "unknown9"
+
+train_reg_data$Public_Private_Indicator <- as.character(train_reg_data$Public_Private_Indicator)
+train_reg_data$Public_Private_Indicator[is.na(train_reg_data$Public_Private_Indicator)] <- ""
+train_reg_data$Public_Private_Indicator[which(train_reg_data$Public_Private_Indicator == "")] = "unknown10"
+
+train_reg_data$Import_Export_Agent_Code <- as.character(train_reg_data$Import_Export_Agent_Code)
+train_reg_data$Import_Export_Agent_Code[is.na(train_reg_data$Import_Export_Agent_Code)] <- ""
+train_reg_data$Import_Export_Agent_Code[which(train_reg_data$Import_Export_Agent_Code == "")] = "unknown13"
+
+train_reg_data$Global_Ultimate_Indicator <- as.character(train_reg_data$Global_Ultimate_Indicator)
+train_reg_data$Global_Ultimate_Indicator[is.na(train_reg_data$Global_Ultimate_Indicator)] <- ""
+train_reg_data$Global_Ultimate_Indicator[which(train_reg_data$Global_Ultimate_Indicator == "")] = "unknown16"
+
+train_reg_data$Major_Industry_Category_Name <- as.character(train_reg_data$Major_Industry_Category_Name)
+train_reg_data$Major_Industry_Category_Name[is.na(train_reg_data$Major_Industry_Category_Name)] <- ""
+train_reg_data$Major_Industry_Category_Name[which(train_reg_data$Major_Industry_Category_Name == "")] = "unknown17"
+
+train_reg_data$Site_Status <- as.character(train_reg_data$Site_Status)
+train_reg_data$Site_Status[is.na(train_reg_data$Site_Status)] <- ""
+train_reg_data$Site_Status[which(train_reg_data$Site_Status == "")] = "unknown18"
+
+train_reg_data$Revenue_Range <- as.character(train_reg_data$Revenue_Range)
+train_reg_data$Revenue_Range[is.na(train_reg_data$Revenue_Range)] <- ""
+train_reg_data$Revenue_Range[which(train_reg_data$Revenue_Range == "")] = "unknown19"
+
+train_reg_data$Subsidiary_Indicator <- as.character(train_reg_data$Subsidiary_Indicator)
+train_reg_data$Subsidiary_Indicator[is.na(train_reg_data$Subsidiary_Indicator)] <- ""
+train_reg_data$Subsidiary_Indicator[which(train_reg_data$Subsidiary_Indicator == "")] = "2"
+
+train_reg_data$Manufacturing_Indicator <- as.character(train_reg_data$Manufacturing_Indicator)
+train_reg_data$Manufacturing_Indicator[is.na(train_reg_data$Manufacturing_Indicator)] <- ""
+train_reg_data$Manufacturing_Indicator[which(train_reg_data$Manufacturing_Indicator == "")] = "2"
+
+train_reg_data$Legal_Status_Code <- as.character(train_reg_data$Legal_Status_Code)
+train_reg_data$Legal_Status_Code[is.na(train_reg_data$Legal_Status_Code)] <- ""
+train_reg_data$Legal_Status_Code[which(train_reg_data$Legal_Status_Code == "")] = "200"
+
+train_reg_data$Status_Code <- as.character(train_reg_data$Status_Code)
+train_reg_data$Status_Code[is.na(train_reg_data$Status_Code)] <- ""
+train_reg_data$Status_Code[which(train_reg_data$Status_Code == "")] = "3"
+
+train_reg_data$Population_Code <- as.character(train_reg_data$Population_Code)
+train_reg_data$Population_Code[is.na(train_reg_data$Population_Code)] <- ""
+train_reg_data$Population_Code[which(train_reg_data$Population_Code == "")] = "10"
+
+train_reg_data$Owns_Rents_Code <- as.character(train_reg_data$Owns_Rents_Code)
+train_reg_data$Owns_Rents_Code[is.na(train_reg_data$Owns_Rents_Code)] <- ""
+train_reg_data$Owns_Rents_Code[which(train_reg_data$Owns_Rents_Code == "")] = "ownsrentmiss"
+
+#######################
+#Test
+
+
+test_reg_data$Business_Code <- as.character(test_reg_data$Business_Code)
+test_reg_data$Business_Code[is.na(test_reg_data$Business_Code)] <- "Other"
+
+test_reg_data$Location_Type <- as.character(test_reg_data$Location_Type)
+test_reg_data$Location_Type[is.na(test_reg_data$Location_Type)] <- ""
+test_reg_data$Location_Type[which(test_reg_data$Location_Type == "")] = "unknown8"
+
+test_reg_data$BEMFAB__Marketability_ <- as.character(test_reg_data$BEMFAB__Marketability_)
+test_reg_data$BEMFAB__Marketability_[is.na(test_reg_data$BEMFAB__Marketability_)] <- ""
+test_reg_data$BEMFAB__Marketability_[which(test_reg_data$BEMFAB__Marketability_ == "")] = "unknown9"
+
+test_reg_data$Public_Private_Indicator <- as.character(test_reg_data$Public_Private_Indicator)
+test_reg_data$Public_Private_Indicator[is.na(test_reg_data$Public_Private_Indicator)] <- ""
+test_reg_data$Public_Private_Indicator[which(test_reg_data$Public_Private_Indicator == "")] = "unknown10"
+
+test_reg_data$Import_Export_Agent_Code <- as.character(test_reg_data$Import_Export_Agent_Code)
+test_reg_data$Import_Export_Agent_Code[is.na(test_reg_data$Import_Export_Agent_Code)] <- ""
+test_reg_data$Import_Export_Agent_Code[which(test_reg_data$Import_Export_Agent_Code == "")] = "unknown13"
+
+test_reg_data$Global_Ultimate_Indicator <- as.character(test_reg_data$Global_Ultimate_Indicator)
+test_reg_data$Global_Ultimate_Indicator[is.na(test_reg_data$Global_Ultimate_Indicator)] <- ""
+test_reg_data$Global_Ultimate_Indicator[which(test_reg_data$Global_Ultimate_Indicator == "")] = "unknown16"
+
+test_reg_data$Major_Industry_Category_Name <- as.character(test_reg_data$Major_Industry_Category_Name)
+test_reg_data$Major_Industry_Category_Name[is.na(test_reg_data$Major_Industry_Category_Name)] <- ""
+test_reg_data$Major_Industry_Category_Name[which(test_reg_data$Major_Industry_Category_Name == "")] = "unknown17"
+
+test_reg_data$Site_Status <- as.character(test_reg_data$Site_Status)
+test_reg_data$Site_Status[is.na(test_reg_data$Site_Status)] <- ""
+test_reg_data$Site_Status[which(test_reg_data$Site_Status == "")] = "unknown18"
+
+test_reg_data$Revenue_Range <- as.character(test_reg_data$Revenue_Range)
+test_reg_data$Revenue_Range[is.na(test_reg_data$Revenue_Range)] <- ""
+test_reg_data$Revenue_Range[which(test_reg_data$Revenue_Range == "")] = "unknown19"
+
+test_reg_data$Subsidiary_Indicator <- as.character(test_reg_data$Subsidiary_Indicator)
+test_reg_data$Subsidiary_Indicator[is.na(test_reg_data$Subsidiary_Indicator)] <- ""
+test_reg_data$Subsidiary_Indicator[which(test_reg_data$Subsidiary_Indicator == "")] = "2"
+
+test_reg_data$Manufacturing_Indicator <- as.character(test_reg_data$Manufacturing_Indicator)
+test_reg_data$Manufacturing_Indicator[is.na(test_reg_data$Manufacturing_Indicator)] <- ""
+test_reg_data$Manufacturing_Indicator[which(test_reg_data$Manufacturing_Indicator == "")] = "2"
+
+test_reg_data$Legal_Status_Code <- as.character(test_reg_data$Legal_Status_Code)
+test_reg_data$Legal_Status_Code[is.na(test_reg_data$Legal_Status_Code)] <- ""
+test_reg_data$Legal_Status_Code[which(test_reg_data$Legal_Status_Code == "")] = "200"
+
+test_reg_data$Status_Code <- as.character(test_reg_data$Status_Code)
+test_reg_data$Status_Code[is.na(test_reg_data$Status_Code)] <- ""
+test_reg_data$Status_Code[which(test_reg_data$Status_Code == "")] = "3"
+
+test_reg_data$Population_Code <- as.character(test_reg_data$Population_Code)
+test_reg_data$Population_Code[is.na(test_reg_data$Population_Code)] <- ""
+test_reg_data$Population_Code[which(test_reg_data$Population_Code == "")] = "10"
+
+test_reg_data$Owns_Rents_Code <- as.character(test_reg_data$Owns_Rents_Code)
+test_reg_data$Owns_Rents_Code[is.na(test_reg_data$Owns_Rents_Code)] <- ""
+test_reg_data$Owns_Rents_Code[which(test_reg_data$Owns_Rents_Code == "")] = "ownsrentmiss"
+
+```
+
+
+## Factorize the categorical variables
+
+```{r LogReg}
+
+
+train_reg_data$Business_Code <- as.factor(train_reg_data$Business_Code)
+train_reg_data$Location_Type <- as.factor(train_reg_data$Location_Type )
+train_reg_data$BEMFAB__Marketability_ <- as.factor(train_reg_data$BEMFAB__Marketability_ )
+train_reg_data$Public_Private_Indicator <- as.factor(train_reg_data$Public_Private_Indicator )
+train_reg_data$Owns_Rents_Code <- as.factor(train_reg_data$Owns_Rents_Code )
+train_reg_data$Status_Code <- as.factor(train_reg_data$Status_Code )
+train_reg_data$Revenue_Range <- as.factor(train_reg_data$Revenue_Range)
+train_reg_data$Global_Ultimate_Indicator <- as.factor(train_reg_data$Global_Ultimate_Indicator)
+train_reg_data$Major_Industry_Category_Name <- as.factor(train_reg_data$Major_Industry_Category_Name)
+train_reg_data$Subsidiary_Indicator <- as.factor(train_reg_data$Subsidiary_Indicator)
+train_reg_data$Legal_Status_Code <- as.factor(train_reg_data$Legal_Status_Code)
+train_reg_data$Population_Code <- as.factor(train_reg_data$Population_Code)
+train_reg_data$Manufacturing_Indicator <- as.factor(train_reg_data$Manufacturing_Indicator)
+train_reg_data$Import_Export_Agent_Code <- as.factor(train_reg_data$Import_Export_Agent_Code)
+train_reg_data$Site_Status <- as.factor(train_reg_data$Site_Status)
+
+test_reg_data$Business_Code <- as.factor(test_reg_data$Business_Code)
+test_reg_data$Location_Type <- as.factor(test_reg_data$Location_Type )
+test_reg_data$BEMFAB__Marketability_ <- as.factor(test_reg_data$BEMFAB__Marketability_ )
+test_reg_data$Public_Private_Indicator <- as.factor(test_reg_data$Public_Private_Indicator )
+test_reg_data$Owns_Rents_Code <- as.factor(test_reg_data$Owns_Rents_Code )
+test_reg_data$Status_Code <- as.factor(test_reg_data$Status_Code )
+test_reg_data$Revenue_Range <- as.factor(test_reg_data$Revenue_Range)
+test_reg_data$Global_Ultimate_Indicator <- as.factor(test_reg_data$Global_Ultimate_Indicator)
+test_reg_data$Major_Industry_Category_Name <- as.factor(test_reg_data$Major_Industry_Category_Name)
+test_reg_data$Subsidiary_Indicator <- as.factor(test_reg_data$Subsidiary_Indicator)
+test_reg_data$Legal_Status_Code <- as.factor(test_reg_data$Legal_Status_Code)
+test_reg_data$Population_Code <- as.factor(test_reg_data$Population_Code)
+test_reg_data$Manufacturing_Indicator <- as.factor(test_reg_data$Manufacturing_Indicator)
+test_reg_data$Import_Export_Agent_Code <- as.factor(test_reg_data$Import_Export_Agent_Code)
+test_reg_data$Site_Status <- as.factor(test_reg_data$Site_Status)
+# ## Levels of factors
+# levels(train_reg_data$churned) #Levels of the Class
+# str(train_reg_data)
+
+```
+
+
+
+
+## Merge categories
+```{r}
+
+library(forcats)
+
+vari <- train_reg_data$Import_Export_Agent_Code
+
+difference_train <- setdiff(levels(as.factor(train_reg_data$Import_Export_Agent_Code)),c("A","B","C","D","G","H","unknown13"))
+difference_test <- setdiff(levels(as.factor(test_reg_data$Import_Export_Agent_Code)),c("A","B","C","D","G","H","unknown13"))
+
+train_reg_data$Import_Export_Agent_Code <- fct_collapse(train_reg_data$Import_Export_Agent_Code, unknown13 = difference_train)
+test_reg_data$Import_Export_Agent_Code <- fct_collapse(test_reg_data$Import_Export_Agent_Code, unknown13 = difference_test)
+
+```
+
+
+
+## Outlier treatment
+
+```{r LogReg}
+
+#Capping
+
+outlier_norm <- function(x){
+  qntile <- quantile(x, probs=c(.25, .75))
+  caps <- quantile(x, probs=c(.05, .95))
+  H <- 1.5 * IQR(x, na.rm = T)
+  x[x < (qntile[1] - H)] <- caps[1]
+  x[x > (qntile[2] + H)] <- caps[2]
+  return(x)
+}
+
+train_reg_data$total_products=outlier_norm(train_reg_data$total_products)
+train_reg_data$total_transactions=outlier_norm(train_reg_data$total_transactions)
+train_reg_data$total_accounts=outlier_norm(train_reg_data$total_accounts)
+train_reg_data$Square_Footage=outlier_norm(train_reg_data$Square_Footage)
+train_reg_data$Number_of_Family_Members=outlier_norm(train_reg_data$Number_of_Family_Members)
+train_reg_data$Domestic_Ultimate_Employee_Count=outlier_norm(train_reg_data$Domestic_Ultimate_Employee_Count)
+train_reg_data$US_1987_SIC_1=outlier_norm(train_reg_data$US_1987_SIC_1)
+
+
+test_reg_data$total_products=outlier_norm(test_reg_data$total_products)
+test_reg_data$total_transactions=outlier_norm(test_reg_data$total_transactions)
+test_reg_data$total_accounts=outlier_norm(test_reg_data$total_accounts)
+test_reg_data$Square_Footage=outlier_norm(test_reg_data$Square_Footage)
+test_reg_data$Number_of_Family_Members=outlier_norm(test_reg_data$Number_of_Family_Members)
+test_reg_data$Domestic_Ultimate_Employee_Count=outlier_norm(test_reg_data$Domestic_Ultimate_Employee_Count)
+test_reg_data$US_1987_SIC_1=outlier_norm(test_reg_data$US_1987_SIC_1)
+
+# pdf('rplot1.pdf')
+# for (i in 1:ncol(train_reg_data)){
+# 
+#   pbox(train_reg_data, pos = i)
+# }
+# dev.off()
+
+
+
+```
+
+
+## Download datasets
+
+
+View(train_reg_data)
+
+```{r LogReg}
+
+trainIndex <- createDataPartition(train_reg_data[['churned_year']], p = 0.8, list = FALSE)
+data_train <- train_reg_data %>% dplyr::slice(trainIndex)
+data_val <- train_reg_data %>% dplyr::slice(-trainIndex)
+
+write.csv(data_train,"train_reg_data_final_classification_new.csv")
+write.csv(data_val,"val_data_final_classification_new.csv")
+write.csv(test_reg_data,"test_reg_data_final_classification_new.csv")
+
+
+```
+
+
+## Explore data
+
+
+```{r LogReg}
+skim(train_reg_data)
+summary(train_reg_data)
+
+dds <- train_reg_data %>% ggpairs(aes(color = churned), legend = c(1)) 
+colnames(train_reg_data)
+str(train_reg_data)
+
+corr_plot <- plot_correlation(train_reg_data)
+plot_intro(train_reg_data)
+plot_intro(test_reg_data)
+plot_str(train_reg_data)
+
+# 
+# d=train_reg_data
+# cor(d[,sapply(d,is.numeric)])
+# 
+# corrplot(cor(d[,sapply(d,is.numeric)]))
+# 
+# chart.Correlation(d[,sapply(d,is.numeric)])
+# boxplot(train_reg_data[-9], col = 'orange', main = 'Features Boxplot')
+
+```
+
+
+## LASSO
+
+```{r LogReg}
+
+library(glmnet)
+
+target_var <- 'churned'
+model_form <- churned ~ .
+model_type <- 'glmnet'
+
+trControl <- trainControl(method = 'cv', number = 5, savePredictions = TRUE, selectionFunction = 'oneSE')
+#tGrid <- expand.grid(alpha = c(1), lambda = 10^seq(3, -2, length = 100)) # alpha = 1 indicates LASSO
+
+
+# note: as the penalty depends on the absolute size of the beta parameters, we should standardize the data first
+model_recipe <- recipe(model_form, data = train_reg_data) %>% 
+  step_novel(all_predictors(), -all_numeric()) %>%
+  step_unknown(all_predictors(), -all_numeric()) %>%
+  step_dummy(all_nominal(), -all_outcomes()) %>%
+  step_normalize(all_predictors()) %>%
+  step_zv(all_predictors())
+
+
+
+lasso <- train(model_recipe, data = train_reg_data, method = model_type, trControl = trControl)
+
+View(train_reg_data)
+
+lasso
+plot(lasso)
+
+# we can also look at which variables are selected for LASSO
+(lasso_best_coef <- coef(lasso$finalModel, lasso$bestTune$lambda))
+
+# let's predict the performance of the ridge regression on the test data and compare it against standard linear regression
+lm_fit <- train(model_recipe, data = data_train, method = 'lm', trControl = trControl)
+
+lasso_pred <- predict(lasso, newdata = data_test, type = 'raw')
+lm_pred <- predict(lm_fit, newdata = data_test, type = 'raw')
+
+(rmse_lasso <- postResample(pred = lasso_pred, obs= data_test[[target_var]]))
+(rmse_lm <- postResample(pred = lm_pred, obs= data_test[[target_var]]))
+
+
+```
+
+
+
+
+
+
+```{r}
+
+
+
+## Required libraries:
+library(ISLR)
+library(GGally)
+library(Hmisc)
+library(e1071)
+library(pROC)
+library(tidyverse)
+library(caret)
+library(skimr)
+library(tidymodels)
+library(visdat)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(pROC)
+library(kernlab)
+library(glmnet)
+
+# new: let's parallelize things. thanks to the caret package, we only need the following four lines to fully parallelize the model training
+library(doParallel)
+num_cores <- detectCores() #note: you can specify a smaller number if you want
+cl <- makePSOCKcluster(num_cores)
+registerDoParallel(cl)
+
+
+
+colnames(data_train)
+summary(data_train)
+
+
+###### PART D
+## Ridge Regression
+
+target_var <- 'churned_year'
+model_form <- churned_year ~ .
+model_type <- 'glmnet'
+
+
+#My Nuid: 03395324
+set.seed(1)
+
+# Train-Test Split: 70-30% split
+trainIndex <- createDataPartition(data_train[[target_var]], p = 0.8, list = FALSE)
+data_train <- data_train %>% slice(trainIndex)
+data_val <- data_train %>% slice(-trainIndex)
+
+
+#--------------------------------------------------------------------------------------#
+
+
+trControl <- trainControl(method = 'cv', number = 10, savePredictions = TRUE)
+
+tGrid <- expand.grid(alpha = c(0), lambda = 10^seq(3, -2, length = 100)) # alpha = 0 indicates ridge regression
+
+
+model_recipe <- recipe(model_form, data = data_train) %>% 
+  step_novel(all_predictors(), -all_numeric()) %>%
+  step_unknown(all_predictors(), -all_numeric()) %>%
+  step_dummy(all_nominal(), -all_outcomes()) %>% 
+  step_nzv(all_predictors())
+
+ridge <- train(model_recipe, data = data_train, method = model_type, trControl = trControl, tuneGrid = tGrid)
+
+ridge
+plot(ridge)
+
+#Number of variables 
+(ridge_best_coef <- coef(ridge$finalModel, ridge$bestTune$lambda))
+length(ridge_best_coef[!ridge_best_coef==0])
+
+# let's predict the performance of the ridge regression on the test data and compare it against standard linear regression
+lm_fit <- train(model_recipe, data = data_train, method = 'lm', trControl = trControl)
+
+ridge_pred <- predict(ridge, newdata = data_val, type = 'raw')
+lm_pred <- predict(lm_fit, newdata = data_val, type = 'raw')
+
+
+(rmse_ridge <- postResample(pred = ridge_pred, obs= data_val[[target_var]]))
+(rmse_lm <- postResample(pred = lm_pred, obs= data_val[[target_var]]))
+
+ridge_pred <- predict(ridge, newdata = data_test, type = 'raw')
+lm_pred <- predict(lm_fit, newdata = data_test, type = 'raw')
+
+
+trControl <- trainControl(method = 'cv', number = 10, savePredictions = TRUE)
+
+tGrid <- expand.grid(alpha = c(1), lambda = 10^seq(3, -2, length = 100)) # alpha = 1 indicates lasso regression
+
+
+model_recipe <- recipe(model_form, data = data_train) %>% 
+  step_novel(all_predictors(), -all_numeric()) %>%
+  step_unknown(all_predictors(), -all_numeric()) %>%
+  step_dummy(all_nominal(), -all_outcomes()) %>%
+  step_normalize(all_predictors()) %>%
+  step_zv(all_predictors())
+
+
+lasso <- train(model_recipe, data = data_train, method = model_type, trControl = trControl, tuneGrid = tGrid)
+
+lasso
+plot(lasso)
+
+# we can also look at which variables are selected for LASSO
+(lasso_best_coef <- coef(lasso$finalModel, lasso$bestTune$lambda))
+#Number of variables 
+length(lasso_best_coef[!lasso_best_coef==0])
+
+# let's predict the performance of the ridge regression on the test data and compare it against standard linear regression
+lm_fit <- train(model_recipe, data = data_train, method = 'lm', trControl = trControl)
+
+lasso_pred <- predict(lasso, newdata = data_val, type = 'raw')
+lm_pred <- predict(lm_fit, newdata = data_val, type = 'raw')
+
+(rmse_lasso <- postResample(pred = lasso_pred, obs= data_val[[target_var]]))
+(rmse_lm <- postResample(pred = lm_pred, obs= data_val[[target_var]]))
+
+
+lasso_pred <- predict(lasso, newdata = data_test, type = 'raw')
+lasso_pred
+lm_pred <- predict(lm_fit, newdata = data_test, type = 'raw')
+lm_pred
+
+###### PART F
+# Linear Regression: OLS
+# This part is implemented in the part D and E only, check for 'lm' model above
+
+
+churn_year <- (2020 - data_test$age_of_company) + round(lm_pred)
+write.csv(churn_year, 'lm_regress_out.csv')  ### final outcome
+
+
+
+```
+
